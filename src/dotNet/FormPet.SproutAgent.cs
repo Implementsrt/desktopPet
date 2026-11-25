@@ -14,6 +14,7 @@ namespace DesktopPet
     {
         private const string AgentPipeName = "DesktopPet.Sprout.v1";
         private const string AgentSit = "sit", AgentFireworks = "fireworks";
+        private static readonly UTF8Encoding AgentEncoding = new UTF8Encoding(false, true);
         private NamedPipeServerStream agentPipe;
 
         private void AddAgentMenu(ContextMenuStrip menu)
@@ -104,14 +105,18 @@ namespace DesktopPet
 
         private static async Task<string> ReadAgentCommand(NamedPipeServerStream pipe)
         {
-            var buffer = new byte[80];
+            var buffer = new byte[1024];
             int received = 0;
             while (received < buffer.Length)
             {
                 int count = await pipe.ReadAsync(buffer, received, buffer.Length - received).ConfigureAwait(false);
                 if (count == 0) return null;
                 int newline = Array.IndexOf(buffer, (byte)'\n', received, count);
-                if (newline >= 0) return Encoding.ASCII.GetString(buffer, 0, newline).TrimEnd('\r');
+                if (newline >= 0)
+                {
+                    try { return AgentEncoding.GetString(buffer, 0, newline).TrimStart('\uFEFF').TrimEnd('\r'); }
+                    catch (DecoderFallbackException) { return ""; }
+                }
                 received += count;
             }
             return "";
@@ -128,7 +133,10 @@ namespace DesktopPet
         private string ExecuteAgentCommand(string command)
         {
             if (command == "capabilities")
-                return new JavaScriptSerializer().Serialize(new { ok = true, version = 1, actions = new[] { AgentSit, AgentFireworks } });
+                return new JavaScriptSerializer().Serialize(new { ok = true, version = 1, actions = new[] { AgentSit, AgentFireworks },
+                    commands = new[] { "status", "capabilities", "context", "say" } });
+            if (command == "context")
+                return new JavaScriptSerializer().Serialize(new { ok = true, context = ReadSproutContext() });
             if (command == "status")
                 return new JavaScriptSerializer().Serialize(new
                 {
@@ -137,6 +145,16 @@ namespace DesktopPet
                         IsDragging ? "dragging" : IsTossing ? "airborne" : SkillMovesSprout ? "playing" : "awake",
                     onWindow = hwndWindow != IntPtr.Zero
                 });
+            if (command.StartsWith("say ", StringComparison.Ordinal))
+            {
+                string words = command.Substring(4).Trim();
+                if (words.Length == 0 || words.Length > 130 || Array.Exists(words.ToCharArray(), char.IsControl)) return AgentError("invalid_text");
+                if (IsLeaving || !Visible || CurrentAnimation.ID == Animations.AnimationKill ||
+                    CurrentAnimation.ID == SproutSleep || ReadSproutContext().foreground == "fullscreen") return AgentError("busy");
+                if (DateTime.UtcNow - lastSpokenAt < TimeSpan.FromSeconds(5)) return AgentError("cooldown");
+                SpeakSprout(words);
+                return "{\"ok\":true}";
+            }
             if (command != AgentSit && command != AgentFireworks) return AgentError("unknown_command");
             double now = motionClock.Elapsed.TotalMilliseconds;
             if (IsDragging || IsTossing || IsLeaving || climbWindow != IntPtr.Zero || sproutSkill != SproutSkill.None ||

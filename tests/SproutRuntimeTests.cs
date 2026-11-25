@@ -4,10 +4,13 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
+using System.Net;
+using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
 using System.Windows.Forms;
 
 class SproutRuntimeTests
@@ -29,6 +32,10 @@ class SproutRuntimeTests
                 return 0;
             }
             var app = Assembly.LoadFrom("DesktopPet.exe");
+            if (args.Length == 1 && args[0] == "--gemini-smoke") return TestLiveGemini(app);
+            TestMemory(app);
+            TestGeminiTransport(app);
+            TestAutonomyBudget(app);
             var data = app.GetType("DesktopPet.Program", true).GetField("MyData", Members).GetValue(null);
             Call(data, "SetXml", "", "sprout-tests");
             Call(data, "SetIntValue", "Smooth", 1);
@@ -65,6 +72,7 @@ class SproutRuntimeTests
             pet.GetType().GetMethod("Show", new[] { typeof(int), typeof(int) }).Invoke(pet, new[] { Get(xml, "spriteWidth"), Get(xml, "spriteHeight") });
             Set(pet, "DisplayIndex", display);
             Call(pet, "Play", true, -1);
+            Set(pet, "firstObservationAt", DateTime.MaxValue);
             Set(pet, "DisplayIndex", display);
             Set(pet, "readSessionIdle", new Func<uint>(() => 0));
             Set(pet, "skillAllowedAt", double.MaxValue);
@@ -200,6 +208,21 @@ class SproutRuntimeTests
             }
             TestSkills(pet, area, display);
             TestSleep(pet, area, display);
+            Call(pet, "SpeakSprout", "你好，我是小芽！");
+            var speech = (Form)Get(pet, "speechBubble");
+            Check(speech.Visible && area.Contains(speech.Bounds), "Chat speech bubble was not visible inside the display");
+            Point original = speech.Location;
+            pet.Left += 160;
+            Check(speech.Left > original.X, "Chat speech bubble did not follow the pet");
+            Call(pet, "CloseSpeech");
+            Check(speech.IsDisposed, "Chat speech bubble did not close");
+            using (var transcript = new FlowLayoutPanel { Width = 360 })
+            {
+                Call(pet, "AddChatRow", transcript, "用户消息", true, true);
+                int outgoing = transcript.Controls[0].Controls[0].Left;
+                Call(pet, "AddChatRow", transcript, "小芽回复", false, true);
+                Check(outgoing > 100 && transcript.Controls[1].Controls[0].Left < 20, "Chat messages did not align right and left");
+            }
             if (display == 0) TestAgent(pet);
         }
     }
@@ -484,6 +507,13 @@ class SproutRuntimeTests
             }
             Check(AgentRequest("sit").Contains("needs_window"), "Agent sit did not return its window requirement");
             Check(AgentRequest("capabilities").Contains("\"actions\":[\"sit\",\"fireworks\"]"), "Agent could not discover supported actions");
+            string context = AgentRequest("context");
+            Check(context.Contains("\"foreground\"") && context.Contains("\"pointer\"") && !context.Contains("title"),
+                "Agent was not given the limited desktop context");
+            Set(pet, "lastSpokenAt", DateTime.MinValue);
+            Check(AgentRequest("say 你好呀").Contains("\"ok\":true") && (string)Get(pet, "speechText") == "你好呀",
+                "Local agent could not display a UTF-8 message");
+            Check(AgentRequest("say 第二句").Contains("cooldown"), "Speech cooldown did not prevent consecutive messages");
             Check(AgentRequest("move_pointer").Contains("unknown_command"), "Agent accepted a command outside its protocol");
             using (var stall = new NamedPipeClientStream(".", "DesktopPet.Sprout.v1", PipeDirection.InOut))
             {
@@ -497,6 +527,103 @@ class SproutRuntimeTests
         finally { Call(pet, "StopAgentPipe"); }
         Check(Get(pet, "agentPipe") == null, "Agent server did not stop");
         Console.WriteLine("PASS local Agent status, commands, stalled client recovery and opt-in lifecycle");
+    }
+
+    static void TestGeminiTransport(Assembly app)
+    {
+        Type gemini = app.GetType("DesktopPet.SproutGemini", true);
+        var history = Array.CreateInstance(gemini.GetNestedType("Turn", Members), 0);
+        using (var transport = new HttpClient(new StubGemini()))
+        {
+            var task = (Task)gemini.GetMethod("AskThrough", Members).Invoke(null,
+                new object[] { transport, "dummy-api-key", "好奇", history, "你好", CancellationToken.None, false, "过去聊过海星", "刚爬到窗顶" });
+            task.GetAwaiter().GetResult();
+            object reply = task.GetType().GetProperty("Result").GetValue(task);
+            Check((string)Get(reply, "Text") == "你好呀！" && (string)Get(reply, "Action") == "fireworks",
+                "Gemini result did not recover the text and action");
+        }
+        Console.WriteLine("PASS Gemini request signing and reply parsing with a stub HTTP response");
+    }
+
+    static int TestLiveGemini(Assembly app)
+    {
+        try
+        {
+            var keyStore = app.GetType("DesktopPet.SproutGeminiKey", true);
+            string key = (string)keyStore.GetMethod("Load", Members).Invoke(null, null);
+            if (string.IsNullOrEmpty(key)) { Console.WriteLine("Gemini key is not configured in the app"); return 3; }
+            Type gemini = app.GetType("DesktopPet.SproutGemini", true);
+            var task = (Task)gemini.GetMethod("Observe", Members).Invoke(null,
+                new object[] { key, "好奇", "这是连通测试。可保持安静。", CancellationToken.None });
+            task.GetAwaiter().GetResult();
+            Console.WriteLine("PASS live Gemini response through port 7890");
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Type kind = error.GetType();
+            object status = kind.GetProperty("Status", Members)?.GetValue(error);
+            Console.WriteLine("Gemini smoke test failed: {0} {1}", kind.Name, status);
+            return 1;
+        }
+    }
+
+    static void TestAutonomyBudget(Assembly app)
+    {
+        var budget = app.GetType("DesktopPet.SproutAutoSpeech", true);
+        var canRequest = budget.GetMethod("CanRequest", Members);
+        var record = budget.GetMethod("Record", Members);
+        DateTime start = DateTime.UtcNow;
+        record.Invoke(null, new object[] { start });
+        Check(!(bool)canRequest.Invoke(null, new object[] { start.AddSeconds(44) }) &&
+            (bool)canRequest.Invoke(null, new object[] { start.AddSeconds(45) }), "Autonomous requests did not respect the pacing window");
+        budget.GetMethod("RateLimited", Members).Invoke(null, new object[] { start.AddSeconds(1), TimeSpan.FromMinutes(2) });
+        Check(!(bool)canRequest.Invoke(null, new object[] { start.AddSeconds(120) }) &&
+            (bool)canRequest.Invoke(null, new object[] { start.AddSeconds(121) }), "Retry-After was not honored");
+        Console.WriteLine("PASS autonomous pacing and Gemini Retry-After");
+    }
+
+    static void TestMemory(Assembly app)
+    {
+        Type type = app.GetType("DesktopPet.SproutMemory", true);
+        string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "event-fixture-" + Guid.NewGuid().ToString("N") + ".dat");
+        object memory = Activator.CreateInstance(type, Members, null, new object[] { path }, null);
+        type.GetProperty("Local", Members).SetValue(null, memory);
+        try
+        {
+            Call(memory, "AddChat", "user", "我想用原创蜜桃海星素材");
+            for (int i = 0; i < 12; i++) Call(memory, "AddChat", "model", "消息 " + i);
+            Call(memory, "AddEvent", "小芽成功爬到了窗顶");
+            object restored = Activator.CreateInstance(type, Members, null, new object[] { path }, null);
+            Check(((IList)type.GetProperty("Chat", Members).GetValue(restored)).Count == 13 &&
+                ((string)Call(restored, "Recall", "还记得蜜桃海星素材吗")).Contains("原创蜜桃海星") &&
+                ((string)Call(restored, "EventContext")).Contains("爬到了窗顶"), "Chat or event memory did not survive reopening");
+            Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains("蜜桃海星"), "Chat memory was stored as plaintext");
+            var gemini = app.GetType("DesktopPet.SproutGemini", true);
+            var intent = gemini.GetMethod("IsAssetSearch", Members);
+            Check((bool)intent.Invoke(null, new object[] { "那你帮我找一下", "想给你换个素材，网上有开源的吗？" }) &&
+                !(bool)intent.Invoke(null, new object[] { "帮我查文件", "我刚才放了烟花" }), "Asset search routing did not understand the follow-up");
+            Call(restored, "Clear");
+            Check(!File.Exists(path), "Clearing memories did not delete local storage");
+        }
+        finally { Call(memory, "Clear"); }
+        Console.WriteLine("PASS protected local history, relevant recall, event memory and asset search routing");
+    }
+
+    sealed class StubGemini : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            string payload = await request.Content.ReadAsStringAsync();
+            Check(request.Method == HttpMethod.Post && request.RequestUri.Host == "generativelanguage.googleapis.com" &&
+                request.RequestUri.AbsolutePath.EndsWith("gemini-3.5-flash-lite:generateContent") &&
+                request.Headers.Contains("x-goog-api-key") && !payload.Contains("dummy-api-key") &&
+                payload.Contains("你好") && payload.Contains("responseSchema") && payload.Contains("过去聊过海星") &&
+                payload.Contains("刚爬到窗顶") && payload.Contains("不要复述问题"), "Gemini request was malformed");
+            string response = "{\"candidates\":[{\"content\":{\"parts\":[{\"thought\":true,\"text\":\"discard\"}," +
+                "{\"text\":\"{\\\"text\\\":\\\"你好呀！\\\",\\\"action\\\":\\\"fireworks\\\"}\"}]}}]}";
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(response, Encoding.UTF8, "application/json") };
+        }
     }
 
     static string AgentRequest(string command)

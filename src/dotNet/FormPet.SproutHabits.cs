@@ -69,6 +69,7 @@ namespace DesktopPet
                 if (animation != SproutSleep) return false;
                 RestSprout(now);
                 CompleteNaturalTransition(SproutIdle, false);
+                RememberSproutEvent("小芽睡醒了");
                 return true;
             }
 
@@ -104,6 +105,7 @@ namespace DesktopPet
 
         private void RememberToss(double now)
         {
+            RememberSproutEvent("小芽被鼠标抓起来扔了出去");
             if (now - lastThrownAt > 90000) grudges = 0;
             grudges++;
             lastThrownAt = now;

@@ -409,6 +409,7 @@ namespace DesktopPet
                     hwndWindow = target;
                     currentWindowSize = rect;
                     climbWins++;
+                    RememberSproutEvent("小芽成功爬到了窗顶");
                     RestSprout(now);
                     CompleteNaturalTransition(Animations.AnimationFallSoft, false);
                 }
@@ -538,6 +539,7 @@ namespace DesktopPet
 
         private void StartSproutFall(double now, double horizontal = 0)
         {
+            if (climbWindow != IntPtr.Zero || hwndWindow != IntPtr.Zero) RememberSproutEvent("小芽从窗边掉了下来");
             CloseClimbRope();
             if (CurrentAnimation.ID == SproutSit || CurrentAnimation.ID == SproutPeek)
             {

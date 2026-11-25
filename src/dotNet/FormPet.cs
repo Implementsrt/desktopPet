@@ -383,6 +383,7 @@ namespace DesktopPet
                 nextScreenRoamAt = now + 12000;
                 nextFlyAt = now + rand.Next(150000, 280001);
                 skillAllowedAt = now + 7000;
+                StartSproutObservation();
             }
             pictureBox1.Left = 0;
             pictureBox1.Top = 0;
@@ -438,6 +439,7 @@ namespace DesktopPet
             /// </remarks>
         public void Kill()
         {
+            StopSproutObservation();
             StopSproutSkill();
             CloseClimbRope();
             StopAgentPipe();

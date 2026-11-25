@@ -228,6 +228,9 @@ namespace DesktopPet
 
         private void DisposeMotion()
         {
+            chatWindow?.Close();
+            StopSproutObservation();
+            CloseSpeech();
             StopSproutSkill();
             CloseClimbRope();
             StopAgentPipe();

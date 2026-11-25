@@ -23,6 +23,7 @@ namespace DesktopPet
         private void AddSproutSkills(ContextMenuStrip menu)
         {
             AddTemperMenu(menu);
+            AddChatMenu(menu);
             if (Xml.AnimationXML.Image.Skins == 2)
             {
                 var skin = new ToolStripMenuItem("外观");
@@ -336,6 +337,31 @@ namespace DesktopPet
         }
 
         protected override void OnPaint(PaintEventArgs e) => paintEffect?.Invoke(e.Graphics);
+
+        internal void DrawSpeech(Rectangle pet, Rectangle display, string message)
+        {
+            const int width = 278, padding = 11, tail = 8;
+            Size content = TextRenderer.MeasureText(message, SystemFonts.MessageBoxFont, new Size(width - padding * 2, 190),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            int height = Math.Min(168, content.Height) + padding * 2;
+            int center = pet.Left + pet.Width / 2;
+            int x = Math.Max(display.Left, Math.Min(display.Right - width, center - width / 2));
+            bool above = pet.Top - height - tail >= display.Top;
+            int y = above ? pet.Top - height - tail : Math.Min(display.Bottom - height - tail, pet.Bottom);
+            int tipX = Math.Max(13, Math.Min(width - 13, center - x));
+            ShowEffect(new Rectangle(x, Math.Max(y, display.Top), width, height + tail), g =>
+            {
+                int top = above ? 0 : tail;
+                int edge = above ? height - 1 : tail;
+                var body = new Rectangle(0, top, width - 1, height - 1);
+                g.FillRectangle(Brushes.FloralWhite, body);
+                g.DrawRectangle(Pens.SlateGray, body);
+                g.FillPolygon(Brushes.FloralWhite, new[] { new Point(tipX - 6, edge), new Point(tipX, above ? height + tail - 1 : 0), new Point(tipX + 6, edge) });
+                TextRenderer.DrawText(g, message, SystemFonts.MessageBoxFont,
+                    new Rectangle(padding, top + padding, width - padding * 2, height - padding * 2),
+                    Color.FromArgb(43, 55, 65), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            });
+        }
 
         internal void DrawPortal(Point center, double elapsed)
         {
