@@ -110,14 +110,14 @@ class RuntimeMotionTests
                     Set(pet,"IsTossing",true); Set(pet,"tossVertVel",10.0);
                     Set(pet,"tossUpdatedAt",0.0);
                     Set(pet,"hwndWindow",platform.Handle);
-                    Check(!(bool)Call(pet,"CheckTopWindow",false),"Collision fixture is covered by another window");
+                    Check(!(bool)Call(pet,"CheckTopWindow",false,IntPtr.Zero),"Collision fixture is covered by another window");
                     Set(pet,"hwndWindow",IntPtr.Zero);
                     Call(pet,"AdvanceToss",30.0);
                     Check(!(bool)Field(pet,"IsTossing") && (double)Field(pet,"PositionY")+pet.Height==platform.Top && (IntPtr)Field(pet,"hwndWindow")==platform.Handle,"Toss passed through supporting window");
                     Check(pet.Top==(int)((double)Field(pet,"PositionY")+(double)Field(pet,"OffsetY")),"Landing sprite did not apply its own offset");
                     Console.WriteLine("PASS tossed pet lands on a real supporting window");
                     platform.Close();
-                    Check((bool)Call(pet,"CheckTopWindow",true),"Closed supporting window was not invalidated");
+                    Check((bool)Call(pet,"CheckTopWindow",true,IntPtr.Zero),"Closed supporting window was not invalidated");
                     Set(pet,"hwndWindow",IntPtr.Zero);
                     Call(pet,"ResetMotion");
                     Check((IntPtr)Field(pet,"followHook")==IntPtr.Zero,"Detached support hook was not released");
@@ -153,7 +153,8 @@ class RuntimeMotionTests
                 double tossTime=((Stopwatch)Field(pet,"motionClock")).Elapsed.TotalMilliseconds;
                 Set(pet,"tossUpdatedAt",tossTime);
                 Call(pet,"AdvanceToss",tossTime+30);
-                Check(pet.Left>screen.Left && pet.Left<screen.Left+10,"Bounce lost remaining horizontal travel");
+                double bounceX = (double)Field(pet,"PositionX");
+                Check(bounceX > screen.Left && bounceX < screen.Left + 10 && pet.Left == Math.Round(bounceX),"Bounce lost remaining horizontal travel");
                 Check((double)Field(pet,"PositionY")>screen.Bottom-pet.Height-100,"Bounce paused vertical movement");
                 Check(((Timer)Field(pet,"timer1")).Interval==30,"Sprite cadence changed");
                 Set(pet,"PositionY",(double)screen.Bottom-pet.Height-2);

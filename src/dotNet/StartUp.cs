@@ -115,7 +115,7 @@ namespace DesktopPet
                 // Read XML file and start new sheep in 1 second
             if(!xml.ReadXML())
             {
-                Program.MyData.SetXml(Properties.Resources.animations, "esheep64");
+                Program.MyData.SetXml(Xml.DefaultPetXml, "");
                 xml.ReadXML();
             }
 
@@ -353,7 +353,7 @@ namespace DesktopPet
                         
             if (!xml.ReadXML())
             {
-                Program.MyData.SetXml(Properties.Resources.animations, "esheep64");
+                Program.MyData.SetXml(Xml.DefaultPetXml, "");
                 xml.ReadXML();
             }
 

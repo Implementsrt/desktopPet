@@ -72,6 +72,7 @@ stationary attachment uses window events with a 100 ms polling fallback.
 | `RuntimeMotionTests.cs` | Native movement, stock walking distance/cadence, following and support closure, landing, rebound, toss, mirroring, respawn, concurrent pets and resource cleanup. |
 | `TransitionRuntimeTests.cs` | Production `SetNewAnimation -> child.Show -> PlayChild` across borders, landing, sequence completion and dynamic landing expressions; outgoing endpoint order and child anchors in both smooth modes. |
 | `ContinuousTransitionTests.cs` | Running native timers across stock `run_begin -> run` and `fall hard -> walk`; actual sprite pixels, terminal duration/distance, positive/negative OffsetY and children across subsequent sequences. Also live off/on, sync, drag/release, toss with/without an animation, respawn and close during pending transitions. |
+| `SproutRuntimeTests.cs` | Idle timing, window hops, edge climbing and jumps between real walls, seated window following, taskbar rebound, drag and autonomous monitor crossing, pointer reactions, and skill effects and cleanup. |
 
 Continuous frame assertions compare actual PictureBox pixels on every sprite tick.
 The partial-repeat fixture expects `2,3,4,5,4,5` (RepeatFrom=2), then holds the last

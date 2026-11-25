@@ -197,6 +197,21 @@
     <Compile Include="dotNet\FormPet.Motion.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="dotNet\FormPet.Sprout.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutSkills.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutWindows.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutAgent.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutHabits.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
     <Compile Include="dotNet\ContextMenus.cs" />
     <Compile Include="dotNet\EmbeddedAssembly.cs" />
     <Compile Include="dotNet\ProcessIcon.cs" />

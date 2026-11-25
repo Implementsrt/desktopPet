@@ -71,7 +71,7 @@ namespace DesktopPet
 			try
             {
 #if PORTABLE
-                string configFile = "DesktopPet.config";
+                string configFile = Path.Combine(Application.StartupPath, "DesktopPet.config");
 
                 if (Program.IsApplicationInstalled())
                 {
@@ -105,6 +105,13 @@ namespace DesktopPet
             {
                 if (AppConfiguration.AppSettings.Settings[currentProperty.Name] == null)
                 {
+#if PORTABLE
+                    if (currentProperty.Name == SettingName.SmoothMovements)
+                    {
+                        AppConfiguration.AppSettings.Settings.Add(currentProperty.Name, bool.TrueString);
+                        continue;
+                    }
+#endif
                     AppConfiguration.AppSettings.Settings.Add(currentProperty.Name, currentProperty.DefaultValue.ToString());
                 }
             }

@@ -4,6 +4,8 @@ using System.IO;
 using System.Windows.Forms;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Xml.Schema;
 using System.Globalization;
 using System.Xml.Serialization;
@@ -124,78 +126,71 @@ namespace DesktopPet
             /// This function will load the XML. If something can't be loaded as expected, the default XML will be loaded.
             /// </summary>
             /// <returns>true, if the XML was loaded successfully.</returns>
+        internal static string DefaultPetXml
+        {
+            get
+            {
+#if PORTABLE
+                using (var reader = new StreamReader(typeof(Xml).Assembly.GetManifestResourceStream("DesktopPet.SproutAnimations.xml")))
+                    return reader.ReadToEnd();
+#else
+                return Properties.Resources.animations;
+#endif
+            }
+        }
+
         public bool ReadXML()
         {
-            bool bError = false;
-            // Construct an instance of the XmlSerializer with the type
-            // of object that is being deserialized.
-            XmlSerializer mySerializer = new XmlSerializer(typeof(XmlData.RootNode));
-            // To read the file, create a FileStream.
-            MemoryStream stream = new MemoryStream();
-            StreamWriter writer = new StreamWriter(stream);
-            // Try to load local XML
-            try
+            var serializer = new XmlSerializer(typeof(XmlData.RootNode));
+            string configuredXml = Program.MyData.GetXml();
+            AnimationXML = null;
+            if (!string.IsNullOrWhiteSpace(configuredXml))
             {
-                writer.Write(Program.MyData.GetXml());
-                AnimationXMLString = Program.MyData.GetXml();
-             
-                //writer.Write(Properties.Resources.animations);
-                writer.Flush();
-                stream.Position = 0;
-                // Call the Deserialize method and cast to the object type.
-                AnimationXML = (XmlData.RootNode)mySerializer.Deserialize(stream);
-
-                stream.Close();
-
-                Program.MyData.SetImages(AnimationXML.Image.Png);
-                Program.MyData.SetIcon(AnimationXML.Header.Icon);
-            }
-            catch(Exception ex)
-            {
-                StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.warning, "User XML error: " + ex.ToString());
-                if (Program.MyData.GetXml().Length > 100)
-                {
-                    MessageBox.Show("Error parsing animation XML:" + ex.ToString(), "XML error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-                stream.Flush();
-                stream.Position = 0;
-                writer.Write(Properties.Resources.animations);
-                writer.Flush();
-                AnimationXMLString = Properties.Resources.animations;
-                stream.Position = 0;
-                // Call the Deserialize method and cast to the object type.
-                AnimationXML = (XmlData.RootNode)mySerializer.Deserialize(stream);
-
-                Program.MyData.SetXml(Properties.Resources.animations, "esheep64");
-                Program.MyData.SetImages(AnimationXML.Image.Png);
-                Program.MyData.SetIcon(AnimationXML.Header.Icon);
-            }
-            finally
-            {
-                // if the images were loaded from external make some memory available.
-                // don't need it again as its in Properties.Settings.Default.Images
-                AnimationXML.Image.Png = string.Empty;
-                // don't need it again as its in Properties.Settings.Default.Icon
-                AnimationXML.Header.Icon = string.Empty; 
                 try
                 {
-                    ReadImages();
-
-                    if (AnimationXML.Header.Petname.Length > 16) AnimationXML.Header.Petname = AnimationXML.Header.Petname.Substring(0, 16);
+                    using (var reader = new StringReader(configuredXml))
+                        AnimationXML = (XmlData.RootNode)serializer.Deserialize(reader);
+                    if (AnimationXML?.Header == null || AnimationXML.Image == null)
+                        throw new InvalidDataException("Animation header or image is missing.");
+                    AnimationXMLString = configuredXml;
                 }
                 catch (Exception ex)
                 {
-                    StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.error, "Error reading XML: " + ex.Message);
-                    bError = true;
+                    AnimationXML = null;
+                    StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.warning, "User XML error: " + ex);
+                    if (configuredXml.Length > 100)
+                        MessageBox.Show("无法读取桌宠动画：" + ex.Message, "动画文件", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
 
-            if (bError)
+            if (AnimationXML == null)
             {
-                MessageBox.Show("Error, can't load animations file. The original pet will be loaded", "XML error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AnimationXMLString = DefaultPetXml;
+                using (var reader = new StringReader(AnimationXMLString))
+                    AnimationXML = (XmlData.RootNode)serializer.Deserialize(reader);
+                Program.MyData.SetXml(AnimationXMLString, "");
             }
 
-            return !bError;
+            Program.MyData.SetImages(AnimationXML.Image.Png);
+            Program.MyData.SetIcon(AnimationXML.Header.Icon);
+            try
+            {
+                ReadImages();
+                if (AnimationXML.Header.Petname.Length > 16)
+                    AnimationXML.Header.Petname = AnimationXML.Header.Petname.Substring(0, 16);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.error, "Error reading XML: " + ex.Message);
+                MessageBox.Show("无法加载桌宠素材，将恢复默认桌宠。", "动画文件", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+            finally
+            {
+                AnimationXML.Image.Png = string.Empty;
+                AnimationXML.Header.Icon = string.Empty;
+            }
         }
 
             /// <summary>
@@ -353,7 +348,7 @@ namespace DesktopPet
             }
 
             // for each child
-            if (AnimationXML.Childs.Child != null)
+            if (AnimationXML.Childs?.Child != null)
             {
                 foreach (XmlData.ChildNode node in AnimationXML.Childs.Child)
                 {
@@ -532,15 +527,19 @@ namespace DesktopPet
                 }
             }
 
-            var image = new Bitmap(imageStream);
-            // no longer need stream
-            imageStream.Close();
-            while (image.Width * iScale / AnimationXML.Image.TilesX > 255) iScale--; // be sure to not exceed this value! As this will cause a crash in the imagelist component.
-            spriteWidth = image.Width * iScale / AnimationXML.Image.TilesX;
-            spriteHeight = image.Height * iScale / AnimationXML.Image.TilesY;
-            sprites = BuildSprites(image);
-            // have sprites no longer need source sheet
-            image.Dispose();
+            using (imageStream)
+            using (var image = new Bitmap(imageStream))
+            {
+                int sourceWidth = image.Width / AnimationXML.Image.TilesX;
+                int sourceHeight = image.Height / AnimationXML.Image.TilesY;
+                bool sproutSkins = IsSprout && AnimationXML.Image.Skins == 2 && sourceWidth == 152 && sourceHeight == 152;
+                int baseWidth = sproutSkins ? 76 : sourceWidth;
+                int baseHeight = sproutSkins ? 76 : sourceHeight;
+                while (iScale > 1 && (baseWidth * iScale > 255 || baseHeight * iScale > 255)) iScale--;
+                spriteWidth = baseWidth * iScale;
+                spriteHeight = baseHeight * iScale;
+                sprites = BuildSprites(image, sourceWidth, sourceHeight);
+            }
         }
 
         /// <summary>
@@ -548,31 +547,35 @@ namespace DesktopPet
         /// </summary>
         /// <param name="spriteSheet"></param>
         /// <returns></returns>
-        private IList<Bitmap> BuildSprites(Bitmap spriteSheet)
+        internal bool IsSprout => AnimationXML?.Header?.Author == "DesktopPet Preview" && AnimationXML.Header.Petname == "小芽";
+
+        private IList<Bitmap> BuildSprites(Bitmap spriteSheet, int sourceWidth, int sourceHeight)
         {
             var sprites = new List<Bitmap>();
 
-            for (var yOffset = 0; yOffset < spriteSheet.Height; yOffset += spriteHeight / iScale)
+            for (var yOffset = 0; yOffset < spriteSheet.Height; yOffset += sourceHeight)
             {
-                for (var xOffset = 0; xOffset < spriteSheet.Width; xOffset += spriteWidth / iScale)
+                for (var xOffset = 0; xOffset < spriteSheet.Width; xOffset += sourceWidth)
                 {
-                    var bmpImage = new Bitmap(spriteWidth, spriteHeight, spriteSheet.PixelFormat);
-                    //var destRectangle = new Rectangle(0, 0, spriteWidth, spriteHeight);
-                    using (var graphics = Graphics.FromImage(bmpImage))
+                    var source = new Rectangle(xOffset, yOffset, sourceWidth, sourceHeight);
+                    if (spriteWidth == sourceWidth && spriteHeight == sourceHeight)
                     {
-                        for(int x = 0; x < spriteWidth / iScale; x++)
-                        {
-                            for (int y = 0; y < spriteHeight / iScale; y++)
-                            {
-                                var pen = spriteSheet.GetPixel(xOffset + x, yOffset + y);
-                                graphics.FillRectangle(new SolidBrush(pen), new Rectangle(x * iScale, y * iScale, iScale, iScale));
-                            }
-                        }
-                        //graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                        //var sourceRectangle = new Rectangle(xOffset, yOffset, spriteWidth / iScale, spriteHeight / iScale);
-                        //graphics.DrawImage(spriteSheet, destRectangle, sourceRectangle, GraphicsUnit.Pixel);
+                        sprites.Add(spriteSheet.Clone(source, spriteSheet.PixelFormat));
+                        continue;
                     }
-                    sprites.Add(bmpImage);
+                    using (var tile = spriteSheet.Clone(source, spriteSheet.PixelFormat))
+                    {
+                        var frame = new Bitmap(spriteWidth, spriteHeight, PixelFormat.Format32bppArgb);
+                        using (var graphics = Graphics.FromImage(frame))
+                        {
+                            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                            graphics.CompositingMode = CompositingMode.SourceCopy;
+                            graphics.DrawImage(tile, new Rectangle(0, 0, spriteWidth, spriteHeight),
+                                new Rectangle(0, 0, tile.Width, tile.Height), GraphicsUnit.Pixel);
+                        }
+                        sprites.Add(frame);
+                    }
                 }
             }
             return sprites;

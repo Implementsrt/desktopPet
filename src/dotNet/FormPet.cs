@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Text;
 using System.Windows.Forms;
@@ -143,6 +143,16 @@ namespace DesktopPet
             Xml = xml;
             InitializeComponent();
             InitializeMotion();
+            if (IsSprout)
+            {
+                imageList1.ColorDepth = ColorDepth.Depth32Bit;
+                if (Xml.AnimationXML.Image.Skins == 2) CurrentSkin = 1;
+                var menu = new ContextMenuStrip(components);
+                AddSproutSkills(menu);
+                menu.Items.Add("移除小芽", null, (sender, e) => Program.Mainthread.KillSheep(this));
+                menu.Items.Add("退出桌宠", null, (sender, e) => Program.Mainthread.KillSheeps(true));
+                pictureBox1.ContextMenuStrip = menu;
+            }
             Visible = false;            // Is invisible at beginning (we don't know where this sprite should be positioned)
             Opacity = 0.0;
             Screen[] screens = Screen.AllScreens;
@@ -286,7 +296,7 @@ namespace DesktopPet
             // Choose a random skin. Picks a unique skin if there aren't too many pets onscreen
             // EX: if you have only two Twin Shot pets, one will be pink and the other will be orange
             int skins = Xml.AnimationXML.Image.Skins;
-            if (skins > 1)
+            if (skins > 1 && !IsSprout)
             {
                 // Populate a list of taken skins
                 List<int> takenSkins = new List<int>();
@@ -360,6 +370,20 @@ namespace DesktopPet
             {
                 Left = ScreenBounds.X - (spawn.Start.X.GetValue(DisplayIndex) - ScreenBounds.Width) - pictureBox1.Width;
             }
+            if (IsSprout)
+            {
+                Left = ScreenArea.Left + (ScreenArea.Width - pictureBox1.Width) * 2 / 3;
+                Top = ScreenArea.Bottom - pictureBox1.Height;
+                climbWindow = IntPtr.Zero;
+                CloseClimbRope();
+                StopSproutSkill();
+                airborneScreen = null;
+                double now = motionClock.Elapsed.TotalMilliseconds;
+                RestSprout(now);
+                nextScreenRoamAt = now + 12000;
+                nextFlyAt = now + rand.Next(150000, 280001);
+                skillAllowedAt = now + 7000;
+            }
             pictureBox1.Left = 0;
             pictureBox1.Top = 0;
             Width = pictureBox1.Width;
@@ -414,6 +438,11 @@ namespace DesktopPet
             /// </remarks>
         public void Kill()
         {
+            StopSproutSkill();
+            CloseClimbRope();
+            StopAgentPipe();
+            climbWindow = IntPtr.Zero;
+            IsTossing = false;
             foreach(var c in childs)
             {
                 if(c != null && !c.IsDisposed)
@@ -441,6 +470,9 @@ namespace DesktopPet
             /// </remarks>
         public void Sync()
         {
+            StopSproutSkill();
+            CloseClimbRope();
+            climbWindow = IntPtr.Zero;
             if (Animations.AnimationSync > 1)
                 SetNewAnimation(Animations.AnimationSync);
         }
@@ -598,6 +630,7 @@ namespace DesktopPet
             /// </summary>
         private void NextStep()
         {
+            if (climbWindow != IntPtr.Zero && CurrentAnimation.ID == SproutClimb) return;
             if (pendingTransition)
             {
                 // The previous tick reserved a complete interval for its final
@@ -646,7 +679,7 @@ namespace DesktopPet
             }
 
             // Physics runs on the independent motion clock, not sprite frames.
-            if (IsTossing) return;
+            if (IsTossing || SkillMovesSprout || climbWindow != IntPtr.Zero) return;
 
             double x = CurrentAnimation.Start.X.Value;
             double y = CurrentAnimation.Start.Y.Value;
@@ -660,6 +693,7 @@ namespace DesktopPet
             bool bNewAnimation = false;
             int nextAnimation = -1;
             bool landedOnWindow = false;
+            if (IsSprout && TrySproutAction()) return;
                 // If animation is leaving screen, cut the form so that it is not visibile on multiscreens
             bool bLeavingScreen = false;
                 // If the pet is "flipped", mirror the movement
@@ -686,15 +720,16 @@ namespace DesktopPet
                 else    // run window border detection setup and then check right border of all valid windows!
                 {
                     // Retrieve valid windows
-                    Dictionary<IntPtr, string> windows = EnumerateWindows();
+                    Dictionary<IntPtr, string> windows = GetMotionCollisionWindows();
 
                     // For each valid window found:
                     foreach (KeyValuePair<IntPtr, string> window in windows)
                     {
                         // Get size and position of window
-                        if (NativeMethods.GetWindowRect(new HandleRef(this, window.Key), out NativeMethods.RECT rct))
+                        if (CanSupportPet(window.Key) && TryGetPetWindowRect(window.Key, out NativeMethods.RECT rct))
                         {
                             // window right border!
+                            if (IsSprout && window.Value != "Sheep" && CanWalkUnder(rct)) continue;
                             if (PositionX + x <= rct.Right
                                 && PositionX + x >= rct.Right + x // A little bit of wiggle-room so the sheep doesn't phase through the window
                                 && PositionY + y < rct.Bottom // Ignore if below window. REMINDER: Y is inverted
@@ -724,7 +759,7 @@ namespace DesktopPet
                 // If pet is on top of a window, check for left window corner
                 if (hwndWindow != (IntPtr)0)
                 {
-                    if (NativeMethods.GetWindowRect(new HandleRef(this, hwndWindow), out NativeMethods.RECT rct))
+                    if (TryGetPetWindowRect(hwndWindow, out NativeMethods.RECT rct))
                     {
                         if (PositionX + x < rct.Left)    // left window border!
                         {
@@ -766,15 +801,16 @@ namespace DesktopPet
                 else    // run window border detection setup and then check left border of all valid windows!
                 {
                     // Retrieve valid windows
-                    Dictionary<IntPtr, string> windows = EnumerateWindows();
+                    Dictionary<IntPtr, string> windows = GetMotionCollisionWindows();
 
                     // For each valid window found:
                     foreach (KeyValuePair<IntPtr, string> window in windows)
                     {
                         // Get size and position of window
-                        if (NativeMethods.GetWindowRect(new HandleRef(this, window.Key), out NativeMethods.RECT rct))
+                        if (CanSupportPet(window.Key) && TryGetPetWindowRect(window.Key, out NativeMethods.RECT rct))
                         {
                             // window left border!
+                            if (IsSprout && window.Value != "Sheep" && CanWalkUnder(rct)) continue;
                             if (PositionX + x + Width >= rct.Left
                                 && PositionX + x + Width <= rct.Left + x // A little bit of wiggle-room so the sheep doesn't phase through the window
                                 && PositionY + y < rct.Bottom // Ignore if below window. REMINDER: Y is inverted
@@ -804,7 +840,7 @@ namespace DesktopPet
                 // If pet is on top of a window, check for right window corner
                 if (hwndWindow != (IntPtr)0)
                 {
-                    if (NativeMethods.GetWindowRect(new HandleRef(this, hwndWindow), out NativeMethods.RECT rct))
+                    if (TryGetPetWindowRect(hwndWindow, out NativeMethods.RECT rct))
                     {
                         if (PositionX + x + Width > rct.Right)    // right window border!
                         {
@@ -847,13 +883,13 @@ namespace DesktopPet
                 }
                 else
                 {
-                    int iWindowTop = FallDetect((int)y);
-                    if (iWindowTop > 0)
+                    int? windowTop = FallDetect(y);
+                    if (windowTop.HasValue)
                     {
                         int iBorderAnimation = Animations.SetNextBorderAnimation(CurrentAnimation.ID, TNextAnimation.TOnly.WINDOW);
                         if (iBorderAnimation >= 0)
                         {
-                            PositionY = iWindowTop - Height;
+                            PositionY = windowTop.Value - Height;
                             OffsetY = 0;
                             y = 0;
                             nextAnimation = iBorderAnimation;
@@ -912,6 +948,20 @@ namespace DesktopPet
                             PositionY + Height + y >= ScreenArea.Y + ScreenArea.Height - 2 ? TNextAnimation.TOnly.TASKBAR : TNextAnimation.TOnly.NONE
                         );
                     }
+                }
+                if (IsSprout && CurrentAnimation.ID == SproutIdle &&
+                    (motionClock.Elapsed.TotalMilliseconds < nextRoamAt || CursorOverSprout() || readSessionIdle() >= QuietAfter))
+                {
+                    iNextAni = SproutIdle;
+                }
+                if (IsSprout && CurrentAnimation.ID == SproutRun)
+                {
+                    iNextAni = hopTarget != IntPtr.Zero || walkPastWindow != IntPtr.Zero || roamScreen != null || !double.IsNaN(sleepCorner) ? SproutRun : SproutIdle;
+                }
+                if (IsSprout && (CurrentAnimation.ID == SproutLook || CurrentAnimation.ID == SproutDodge))
+                {
+                    FaceLeft(facingBeforeCursor);
+                    iNextAni = resumeAfterCursor;
                 }
                 if(CurrentAnimation.ID == Animations.AnimationKill)
                 {
@@ -972,6 +1022,11 @@ namespace DesktopPet
                         // Window following is non-blocking and also runs at render cadence.
                         if (!FollowWindow())
                         {
+                            if (IsSprout)
+                            {
+                                StartSproutFall(motionClock.Elapsed.TotalMilliseconds);
+                                return;
+                            }
                             hwndWindow = (IntPtr)0;
                             nextAnimation = Animations.SetNextGravityAnimation(CurrentAnimation.ID, TNextAnimation.TOnly.WINDOW);
                             bNewAnimation = true;
@@ -1079,6 +1134,8 @@ namespace DesktopPet
         // and the next sprite tick. Explicit drag/toss/respawn callers own their timing.
         private void CompleteNaturalTransition(int animation, bool landedOnWindow)
         {
+            if (IsSprout && animation == SproutIdle && CurrentAnimation.ID == SproutRun)
+                RestSprout(motionClock.Elapsed.TotalMilliseconds);
             SetNewAnimation(animation);
             if (animation < 0 || IsDisposed) return; // respawn/disposal owns its timing
             // SetNewAnimation evaluates dynamic XML values for the selected display.
@@ -1249,85 +1306,52 @@ namespace DesktopPet
             /// </summary>
             /// <param name="y">Y moves in pixels for the next step (function will detect if window/taskbar is inside the movement).</param>
             /// <returns>Y position of the window or taskbar. -1 if pet is still falling.</returns>
-        private int FallDetect(int y)
+        private int? FallDetect(double displacement)
         {
-            Dictionary<IntPtr, string> windows = new Dictionary<IntPtr, string>();
-            NativeMethods.TITLEBARINFO titleBarInfo = new NativeMethods.TITLEBARINFO();
-            titleBarInfo.cbSize = Marshal.SizeOf(titleBarInfo);
-
-            if (y <= 0) return -1;
             Rectangle area = ScreenArea;
+            double feet = PositionY + Height;
+            double center = PositionX + Width / 2.0;
+            if (displacement <= 0 || PositionY < area.Top) return null;
+
             CheckFullScreen();
-
-                // Enumerate all windows on the desktop.
-            NativeMethods.EnumWindows(delegate (IntPtr hWnd, int lParam)
+            IntPtr support = IntPtr.Zero;
+            NativeMethods.RECT supportRect = default;
+            var titleBar = new NativeMethods.TITLEBARINFO { cbSize = Marshal.SizeOf(typeof(NativeMethods.TITLEBARINFO)) };
+            var title = new StringBuilder(128);
+            NativeMethods.EnumWindows((window, unused) =>
             {
-                if (hWnd == Handle) return true;    // form itself, don't parse
+                if (window == Handle || !CanSupportPet(window) ||
+                    !TryGetPetWindowRect(window, out NativeMethods.RECT rect) ||
+                    rect.Top < feet || rect.Top > feet + displacement || rect.Top > area.Bottom ||
+                    center < rect.Left || center >= rect.Right || (support != IntPtr.Zero && rect.Top >= supportRect.Top))
+                    return true;
 
-                    // Enumerate only visible windows
-                if (NativeMethods.IsWindowVisible(hWnd))
-                {
-                    NativeMethods.RECT candidate;
-                    if (!NativeMethods.GetWindowRect(new HandleRef(this, hWnd), out candidate) ||
-                        PositionY + Height >= candidate.Top || PositionY + Height + y < candidate.Top ||
-                        PositionX < candidate.Left - Width / 2 || PositionX + Width > candidate.Right + Width / 2 ||
-                        PositionY <= 20 + area.Y) return true;
-                    StringBuilder sTitle = new StringBuilder(128);
-                    NativeMethods.GetWindowText(hWnd, sTitle, 128);
+                title.Clear();
+                NativeMethods.GetWindowText(window, title, title.Capacity);
+                if (title.Length == 0) return true;
+                if (title.ToString() != "Sheep" && (!NativeMethods.GetTitleBarInfo(window, ref titleBar) ||
+                    (titleBar.rgstate[0] & 0x00008000) != 0)) return true;
+                if (CheckTopWindow(false, window)) return true;
 
-                    // Sheep windows doesn't have a title bar, but we want detect if another pet is present
-                    if (sTitle.ToString() == "Sheep") { }
-                    // If there is no title bar, continue enumerating other windows
-                    else if (!NativeMethods.GetTitleBarInfo(hWnd, ref titleBarInfo)) return true;
-                    // If title bar is not visible, continue enumerating other windows
-                    else if ((titleBarInfo.rgstate[0] & 0x00008000) > 0) // invisible
-                        return true;
-                    
-                        // If window has a title, add this window to list
-                    if (sTitle.Length > 0)
-                    {
-                        windows[hWnd] = sTitle.ToString();
-                    }
-                }
+                support = window;
+                supportRect = rect;
                 return true;
-            }, (IntPtr)0);
+            }, IntPtr.Zero);
 
-                // For each valid window found:
-            foreach (KeyValuePair<IntPtr, string> window in windows)
+            if (support == IntPtr.Zero) return null;
+            hwndWindow = support;
+            currentWindowSize = supportRect;
+            if (!IsSprout && Program.MyData.GetWindowForeground())
             {
-                    // Get size and position of window
-                if (NativeMethods.GetWindowRect(new HandleRef(this, window.Key), out NativeMethods.RECT rct))
-                {
-                        // If vertical position is in the falling range and pet is over window and window is at least 20 pixels under the screen border
-                    if (PositionY + Height < rct.Top && PositionY + Height + y >= rct.Top &&
-						PositionX >= rct.Left - Width / 2 && PositionX + Width <= rct.Right + Width / 2 &&
-						PositionY > 20 + ScreenArea.Y)
-                    {
-                            // Pet need to walk over THIS window!
-                        hwndWindow = window.Key;
-                        currentWindowSize = rct;
-						StringBuilder sTitle = new StringBuilder(128);
-						NativeMethods.GetWindowText(hwndWindow, sTitle, 128);
-
-						// If window is not covered by other windows, set this as current window for the pet.
-						if (!CheckTopWindow(false))
-                        {
-								// Only if the option is set (this is an invasive functionality)
-							if (Program.MyData.GetWindowForeground())
-							{
-								NativeMethods.ShowWindow(window.Key, 5);        // show window again
-								NativeMethods.SetForegroundWindow(window.Key);  // set focus to window
-							}
-                            return rct.Top;                                 // return the position for the pet
-                        }
-                        else
-                        {
-                            hwndWindow = (IntPtr)0;                         // window is covered by other windows, reset handle
-                        }
-                    }
-                }
+                NativeMethods.ShowWindow(support, 5);
+                NativeMethods.SetForegroundWindow(support);
             }
-            return -1;      // no windows detected.
+            return supportRect.Top;
+        }
+
+        private static bool CanSupportPet(IntPtr window)
+        {
+            return NativeMethods.IsWindowVisible(window) && !NativeMethods.IsIconic(window);
         }
 
         /// <summary>
@@ -1338,9 +1362,9 @@ namespace DesktopPet
 			IntPtr hwnd2 = NativeMethods.GetForegroundWindow();
 			if (hwndFullscreenWindow == (IntPtr)0 && hwnd2 == Handle) return;
 
-            if (NativeMethods.GetWindowRect(new HandleRef(this, hwnd2), out NativeMethods.RECT rct))
+            if (TryGetPetWindowRect(hwnd2, out NativeMethods.RECT rct))
             {
-                Point pWindowCenter = new Point(rct.Top + (rct.Bottom - rct.Top) / 2, rct.Left + (rct.Right - rct.Left) / 2);
+                Point pWindowCenter = new Point(rct.Left + (rct.Right - rct.Left) / 2, rct.Top + (rct.Bottom - rct.Top) / 2);
 
                 if (pWindowCenter.X > ScreenBounds.Left && pWindowCenter.X < ScreenBounds.Right &&
                     pWindowCenter.Y > ScreenBounds.Top && pWindowCenter.Y < ScreenBounds.Bottom &&
@@ -1351,7 +1375,7 @@ namespace DesktopPet
                     {
                         hwndFullscreenWindow = hwnd2;
                         TopMost = false;
-                        NativeMethods.SetForegroundWindow(hwnd2); // set the movie as foreground window and replace the sheep
+                        if (!IsSprout) NativeMethods.SetForegroundWindow(hwnd2);
                     }
                 }
                 else
@@ -1384,7 +1408,7 @@ namespace DesktopPet
                 if (hWnd == Handle) return true;    // form itself, don't parse
 
                 // Enumerate only visible windows
-                if (NativeMethods.IsWindowVisible(hWnd))
+                if (CanSupportPet(hWnd))
                 {
                     StringBuilder sTitle = new StringBuilder(128);
                     NativeMethods.GetWindowText(hWnd, sTitle, 128);
@@ -1414,7 +1438,8 @@ namespace DesktopPet
             if (hwndWindow != IntPtr.Zero)
             {
 				// Get window size and position of the current pet
-				if (!NativeMethods.GetWindowRect(new HandleRef(this, hwndWindow), out NativeMethods.RECT rctO)) return false;
+				if (!CanSupportPet(hwndWindow) ||
+                    !TryGetPetWindowRect(hwndWindow, out NativeMethods.RECT rctO)) return false;
 
 				// window disappeared! Maybe it was closed.
 				if (rctO.Top == 0 && rctO.Bottom == 0)
@@ -1433,6 +1458,7 @@ namespace DesktopPet
                     motion.Follow(currentWindowSize.Left, rctO.Left, ratio, dy);
                     RenderMotion(motionClock.Elapsed.TotalMilliseconds);
                     currentWindowSize = rctO;
+                    UpdateDisplayFromPet();
                     return true;
                 }
             }
@@ -1452,15 +1478,17 @@ namespace DesktopPet
             /// <seealso cref="NativeMethods.GetTitleBarInfo(IntPtr, ref NativeMethods.TITLEBARINFO)"/>
         private bool CheckTopWindow(bool bCheck, IntPtr window = default)
         {
-            // Default to hwndWindow if window is blank
-            if (window == default)
-                window = hwndWindow;
+            return IsWindowCovered(bCheck, window == IntPtr.Zero ? hwndWindow : window, PositionX);
+        }
 
+        private bool IsWindowCovered(bool bCheck, IntPtr window, double probe)
+        {
             // Check only if we have a valid window handler
             if (window != IntPtr.Zero)
             {
 				// Get window size and position of the current pet
-				if (!NativeMethods.GetWindowRect(new HandleRef(this, window), out NativeMethods.RECT rctO)) return true;
+				if (!CanSupportPet(window) ||
+                    !TryGetPetWindowRect(window, out NativeMethods.RECT rctO)) return true;
 
 				// If pet was walking on a window, check if window is still in the same position
 				if (bCheck)
@@ -1489,7 +1517,7 @@ namespace DesktopPet
 						return false;
 					}
 
-                    if (NativeMethods.IsWindowVisible(hwnd2))
+                    if (hwnd2 != Handle && CanSupportPet(hwnd2))
                     {
                         StringBuilder sTitle = new StringBuilder(128);
                         NativeMethods.GetWindowText(hwnd2, sTitle, 128);
@@ -1500,13 +1528,13 @@ namespace DesktopPet
                         if (sTitle.Length > 0 && NativeMethods.GetTitleBarInfo(hwnd2, ref titleBarInfo))
                         {
                             // If window has a title name and a valid size and is not fullscreen
-                            if (NativeMethods.GetWindowRect(new HandleRef(this, hwnd2), out NativeMethods.RECT rct) &&
+                            if (TryGetPetWindowRect(hwnd2, out NativeMethods.RECT rct) &&
                                 (titleBarInfo.rcTitleBar.Bottom >= 0 || sTitle.ToString() == "sheep"))
                             {
                                 //Debug.WriteLine("   -->  Pos:" + rct.Top + "," + rct.Left + " - Size:" + (rct.Right - rct.Left).ToString() + "," + (rct.Bottom - rct.Top).ToString());
                                 if (rct.Top < rctO.Top && rct.Bottom > rctO.Top)
                                 {
-                                    if (rct.Left < PositionX && rct.Right > PositionX + 40/* && iAnimationStep > 4*/)
+                                    if (rct.Left < probe + Width / 2 && rct.Right > probe + Width / 2)
                                     {
                                         //Debug.WriteLine("   --> Window found!");
                                         return true;
@@ -1531,11 +1559,17 @@ namespace DesktopPet
         {
             if (e.Button == MouseButtons.Left && Name.IndexOf("child") < 0)
             {
+                StopSproutSkill();
+                CloseClimbRope();
                 hwndWindow = (IntPtr)0;             // Remove window handles
                 TopMost = false;
                 TopMost = true;                     // Set again the topmost
 				IsDragging = true;                   // Flag it as dragging pet
                 IsTossing = false;                     // Flag it as not being tossed
+                climbWindow = IntPtr.Zero;
+                airborneScreen = null;
+                hopTravelDelay = 0;
+                hopTarget = IntPtr.Zero;
                 BeginSmoothDrag();
                 SetNewAnimation(Animations.AnimationDrag);  // Set the dragging animation (if present)
             }
@@ -1611,63 +1645,48 @@ namespace DesktopPet
         private void PictureBox1_MouseUp(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left || Name.IndexOf("child") >= 0 || !IsDragging) return;
-            if (e.Button == MouseButtons.Left && Name.IndexOf("child") < 0 && IsDragging)
+            ReleaseDrag(Cursor.Position, motionClock.Elapsed.TotalMilliseconds);
+        }
+
+        private void ReleaseDrag(Point pointer, double now)
+        {
+            UpdateDragPosition(pointer, now);
+            TossForce = dragVelocity.TossForce(now);
+            StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.info, "Toss force: (" + TossForce.X + ", " + TossForce.Y + ")");
+            if (IsSprout)
             {
-                double now = motionClock.Elapsed.TotalMilliseconds;
-                UpdateDragPosition(Cursor.Position, now);
-                TossForce = dragVelocity.TossForce(now);
-
-                // Log toss force
-                StartUp.AddDebugInfo(StartUp.DEBUG_TYPE.info, "Toss force: (" + TossForce.X + ", " + TossForce.Y + ")");
-
-                // If the toss force's magnitude (length) is bigger than this value, fling that thang >:)
-                if(TossForce.Length() > 5)
-                {
-                    // If toss animation exists, set it. Otherwise, remain in the dragging animation.
-                    if(Animations.AnimationToss != -1)
-                        SetNewAnimation(Animations.AnimationToss);
-
-                    IsTossing = true;
-
-                    // Init vertical toss velocity
-                    tossVertVel = TossForce.Y;
-                    tossUpdatedAt = now;
-
-                    // Force the interval while tossing to be a nice and smooth 30 (prevents laggy tossing for pets with slow drag animation intervals)
-                    timer1.Interval = 30;
-                }
-                // If toss force wasn't large enough, fall like normal
-                else
-                {
-                    SetNewAnimation(Animations.AnimationFall);
-                }
-                
+                RestSprout(now);
+                reboundOnGround = true;
             }
-            if(IsDragging)
-            {
-                // if it was dragged, check if the screen is different
-                // if(Program.MyData.GetMultiscreen()) <-- If manually moved to another screen, set the new screen as default screen.
-                {
-                    Screen[] screens = Screen.AllScreens;
-                    for(var k=0;k<screens.Length;k++)
-                    {
-                        Rectangle bounds = screens[k].Bounds;
 
-                        if (Left + Width / 2 >= bounds.X && 
-                            Left + Width / 2 <= bounds.X + bounds.Width)
-                        {
-                            if (Top + Height / 2 >= bounds.Y && 
-                                Top + Height <= bounds.Y + bounds.Height)
-                            {
-                                DisplayIndex = k;
-                                break;
-                            }
-                        }
-                    }
-                }
+            if (TossForce.Length() > 5)
+            {
+                if (IsSprout) RememberToss(now);
+                if (Animations.AnimationToss != -1)
+                    SetNewAnimation(Animations.AnimationToss);
+                IsTossing = true;
+                tossVertVel = TossForce.Y;
+                tossUpdatedAt = now;
+                timer1.Interval = 30;
+            }
+            else
+                SetNewAnimation(Animations.AnimationFall);
+
+            UpdateDisplayFromPet();
+            if (IsSprout && !IsTossing)
+            {
+                Rectangle area = ScreenArea;
+                PositionX = Math.Max(area.Left, Math.Min(area.Right - Width, PositionX));
+                PositionY = Math.Max(area.Top, Math.Min(area.Bottom - Height, PositionY));
+                CommitLogicalPosition();
             }
 			IsDragging = false;
             pictureBox1.Capture = false;
+            if (IsSprout && !IsTossing && PositionY + Height < ScreenArea.Bottom - 2)
+            {
+                StartSproutFall(now);
+                return;
+            }
             ResetMotion();
         }
         
@@ -1801,6 +1820,9 @@ namespace DesktopPet
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        internal static extern bool IsIconic(IntPtr hWnd);
 
             /// <summary>
             /// Get the text present in the window title bar.

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Drawing;
@@ -17,10 +17,12 @@ namespace DesktopPet
         private double tossUpdatedAt;
         private bool spritesFlipped;
         private readonly Dictionary<int, Image> flippedSprites = new Dictionary<int, Image>();
+        private readonly Dictionary<int, Image> unflippedSprites = new Dictionary<int, Image>();
         private Timer followFallback;
         private IntPtr followHook, hookedWindow;
         private WinEventCallback followCallback;
         private const uint EventObjectLocationChange = 0x800B;
+        private const double TossGravity = 1.5;
         private delegate void WinEventCallback(IntPtr hook, uint evt, IntPtr window, int objectId, int childId, uint thread, uint time);
         [DllImport("user32.dll")]
         private static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr module, WinEventCallback callback, uint process, uint thread, uint flags);
@@ -31,13 +33,13 @@ namespace DesktopPet
 
         private Image GetSprite(int index)
         {
-            if (!spritesFlipped) return imageList1.Images[index];
+            Dictionary<int, Image> sprites = spritesFlipped ? flippedSprites : unflippedSprites;
             Image image;
-            if (!flippedSprites.TryGetValue(index, out image))
+            if (!sprites.TryGetValue(index, out image))
             {
                 image = imageList1.Images[index];
-                image.RotateFlip(RotateFlipType.RotateNoneFlipX);
-                flippedSprites.Add(index, image);
+                if (spritesFlipped) image.RotateFlip(RotateFlipType.RotateNoneFlipX);
+                sprites.Add(index, image);
             }
             return image;
         }
@@ -67,11 +69,13 @@ namespace DesktopPet
             tossUpdatedAt = now;
             if (dt == 0) return;
 
-            // Check for any window side collisions
-            double windowSide = TossWindowSideCollision(dt);
-
-            Rectangle area = ScreenArea;
-            double nextX = PositionX + TossForce.X * dt;
+            // An intentional hop rises above the edge before moving across it.
+            double horizontalTime = Math.Max(0, dt - hopTravelDelay);
+            hopTravelDelay = Math.Max(0, hopTravelDelay - dt);
+            double nextX = PositionX + TossForce.X * horizontalTime;
+            bool crossing = airborneScreen != null;
+            Rectangle area = FlightArea(nextX);
+            double windowSide = crossing ? 0 : TossWindowSideCollision(horizontalTime);
             double areaRight = area.Right - Width;
 
             // bounce if hitting left/right screen border or a windowSide border
@@ -92,14 +96,15 @@ namespace DesktopPet
                 TossForce.X *= -.5f;
             }
             PositionX = Math.Max(area.Left, Math.Min(areaRight, nextX));
-            double dy = tossVertVel * dt + .75 * dt * dt;
-            tossVertVel += 1.5 * dt;
-            int windowTop = dy > 0 ? FallDetect((int)Math.Ceiling(dy)) : -1;
-            double ground = area.Bottom - Height;
+            double previousY = PositionY;
+            double dy = tossVertVel * dt + TossGravity / 2 * dt * dt;
+            tossVertVel += TossGravity * dt;
+            int? windowTop = dy > 0 ? FallDetect(dy) : null;
+            double ground = ScreenArea.Bottom - Height;
             bool land = PositionY + dy >= ground;
-            if (windowTop != -1 && windowTop - Height <= ground)
+            if (windowTop.HasValue && windowTop.Value - Height <= ground)
             {
-                ground = windowTop - Height;
+                ground = windowTop.Value - Height;
                 land = true;
             }
             PositionY = land ? ground : PositionY + dy;
@@ -108,18 +113,39 @@ namespace DesktopPet
             RenderMotion(now);
             if (land)
             {
+                if (IsSprout && reboundOnGround && hwndWindow == IntPtr.Zero &&
+                    TryReboundFromGround(ground, previousY, dy, dt, now)) return;
                 if ((TossForce.X < 0 && !IsMovingLeft) || (TossForce.X > 0 && IsMovingLeft))
                 {
                     IsMovingLeft = !IsMovingLeft;
                     spritesFlipped = !spritesFlipped;
                 }
                 IsTossing = false;
+                hopTravelDelay = 0;
+                airborneScreen = null;
+                if (IsSprout) RestSprout(now);
                 SetNewAnimation(tossVertVel < 40 ? Animations.AnimationFallSoft : Animations.AnimationFallHard);
-                pictureBox1.Image = GetSprite(CurrentAnimation.Sequence.Frames[0]);
+                pictureBox1.Image = GetSprite(SkinOffset(CurrentAnimation.Sequence.Frames[0]));
                 SyncFollowHook();
             }
         }
 
+        private bool TryReboundFromGround(double ground, double previousY, double displacement, double dt, double now)
+        {
+            // Compute speed at the contact point and spend the remainder of this tick rising again.
+            double overshoot = Math.Max(0, displacement - (ground - previousY));
+            double impact = Math.Sqrt(Math.Max(0, tossVertVel * tossVertVel - 2 * TossGravity * overshoot));
+            double rebound = impact * .49;
+            if (tossVertVel <= 0 || rebound < 3.8) return false;
+
+            double remaining = Math.Max(0, Math.Min(dt, (tossVertVel - impact) / TossGravity));
+            tossVertVel = -rebound + TossGravity * remaining;
+            TossForce.X *= .70f;
+            PositionY = ground - rebound * remaining + TossGravity / 2 * remaining * remaining;
+            motion.Reset(PositionX, PositionY, now);
+            RenderMotion(now);
+            return true;
+        }
             /// <summary>
             /// Check if tossed pet collides with the sides of any windows
             /// </summary>
@@ -129,16 +155,16 @@ namespace DesktopPet
             /// </returns>
         private double TossWindowSideCollision(double dt)
         {
-            if (TossForce.X == 0)
+            if (TossForce.X == 0 || dt == 0)
                 return 0;
 
             // Retrieve valid windows
-            Dictionary<IntPtr, string> windows = EnumerateWindows();
+            Dictionary<IntPtr, string> windows = GetMotionCollisionWindows();
             // For each valid window found:
             foreach (KeyValuePair<IntPtr, string> window in windows)
             {
                 // Get size and position of window
-                if (NativeMethods.GetWindowRect(new HandleRef(this, window.Key), out NativeMethods.RECT rct))
+                if (CanSupportPet(window.Key) && TryGetPetWindowRect(window.Key, out NativeMethods.RECT rct))
                 {
                     // moving left
                     if (TossForce.X < 0)
@@ -202,6 +228,10 @@ namespace DesktopPet
 
         private void DisposeMotion()
         {
+            StopSproutSkill();
+            CloseClimbRope();
+            StopAgentPipe();
+            DisposeSproutAudio();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplaySettingsChanged;
             // Releasing a captured PictureBox during disposal must not start a toss.
             IsDragging = false;
@@ -211,6 +241,8 @@ namespace DesktopPet
             if (followHook != IntPtr.Zero) { UnhookWinEvent(followHook); followHook = IntPtr.Zero; }
             foreach (Image image in flippedSprites.Values) image.Dispose();
             flippedSprites.Clear();
+            foreach (Image image in unflippedSprites.Values) image.Dispose();
+            unflippedSprites.Clear();
         }
 
         private void DisplaySettingsChanged(object sender, EventArgs e)
@@ -244,6 +276,14 @@ namespace DesktopPet
             ResetMotion();
         }
 
+        private void UpdateDisplayFromPet()
+        {
+            Screen destination = Screen.FromRectangle(Bounds);
+            Screen[] screens = Screen.AllScreens;
+            int index = Array.FindIndex(screens, screen => screen.DeviceName == destination.DeviceName);
+            if (index >= 0) DisplayIndex = index;
+        }
+
         private void InitializeMotion()
         {
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplaySettingsChanged;
@@ -256,9 +296,17 @@ namespace DesktopPet
             followFallback.Tick += (sender, e) =>
             {
                 SyncFollowHook();
-                if (!IsLeaving && !IsDragging) FollowWindow();
+                if (!IsLeaving && !IsDragging)
+                {
+                    if (IsSprout && CurrentAnimation.ID != Animations.AnimationKill &&
+                        hwndWindow != IntPtr.Zero && !CanSupportPet(hwndWindow))
+                        StartSproutFall(motionClock.Elapsed.TotalMilliseconds);
+                    else
+                        FollowWindow();
+                }
             };
-            motionTimer = new Timer(components) { Interval = 8 };
+            // A 15 ms interval preserves smooth native motion for Sprout while limiting redraws.
+            motionTimer = new Timer(components) { Interval = IsSprout ? 15 : 8 };
             motionTimer.Tick += MotionTimer_Tick;
             pictureBox1.MouseMove += (sender, e) =>
             {
@@ -275,7 +323,7 @@ namespace DesktopPet
         {
             motion.Reset(Left, Top, motionClock.Elapsed.TotalMilliseconds);
             SyncFollowHook();
-            SetMotionTimer(IsDragging || IsTossing);
+            SetMotionTimer(IsDragging || IsTossing || climbWindow != IntPtr.Zero || sproutSkill != SproutSkill.None);
         }
 
         private void QueueMotion(int milliseconds)
@@ -311,7 +359,10 @@ namespace DesktopPet
                 UpdateDragPosition(Cursor.Position, now);
                 return;
             }
+            if (sproutSkill != SproutSkill.None) AdvanceSproutSkill(now, Cursor.Position);
+            if (SkillMovesSprout) return;
             if (IsTossing) AdvanceToss(now);
+            else if (climbWindow != IntPtr.Zero) AdvanceClimb(now);
             else if (!UseSmoothMovements && !IsLeaving)
             {
                 // The option may change in the middle of an interpolation segment.
@@ -324,7 +375,8 @@ namespace DesktopPet
                 // FollowWindow may have rendered a newer timestamp. Never render backwards.
                 if (motion.Initialized) RenderMotion(motionClock.Elapsed.TotalMilliseconds);
             }
-            if (!IsTossing && !motion.IsMoving(now)) SetMotionTimer(false);
+            if (!IsTossing && climbWindow == IntPtr.Zero && sproutSkill == SproutSkill.None &&
+                !motion.IsMoving(now)) SetMotionTimer(false);
         }
 
         private void BeginSmoothDrag()

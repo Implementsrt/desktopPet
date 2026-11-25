@@ -36,7 +36,7 @@ namespace DesktopPet
 
 		public static class SpecialOptions
 		{
-			public const string RestorePet = "Restore Pet";
+			public const string RestorePet = "恢复默认桌宠";
 		}
 
 
@@ -53,53 +53,53 @@ namespace DesktopPet
 			// Note: Order Options by Title, like on Windows
 			options.Add(new OptionIcons
 			{
-				Title = "Multiscreen",
+				Title = "随机出生屏幕",
 				Setting = SettingName.Multiscreen,
 				IsCheckbox = true,
 				Value = Program.MyData.GetIntValue(SettingName.Multiscreen),
 				Image = Resources.ico_multi,
-				Description = "If you have more than 1 screen, the pet will not spawn only on the primary monitor."
+				Description = "有多块屏幕时，随机选择出现在哪一块。"
 			});
 
 			options.Add(new OptionIcons
 			{
-				Title = "Smooth Movements",
+				Title = "平滑移动",
 				Setting = SettingName.SmoothMovements,
 				IsCheckbox = true,
 				Value = Program.MyData.GetIntValue(SettingName.SmoothMovements),
 				Image = Resources.ico_smooth,
-				Description = "Movement are croppy / jittery as it moves several pixels on each frame. If you have it smoother, the movement can be unnatural."
+				Description = "在两帧动画之间补上移动，让跑步和落地更顺畅。"
 			});
 
 			options.Add(new OptionIcons
 			{
-				Title = "Taskbar Focus",
+				Title = "任务栏上方显示",
 				Setting = SettingName.StealTaskbarFocus,
 				IsCheckbox = true,
 				Value = Program.MyData.GetIntValue(SettingName.StealTaskbarFocus),
 				Image = Resources.ico_focus,
-				Description = "Prevent the Taskbar to overlap the pet (click on the tray icon will be more difficult as the pet will steal the focus)."
+				Description = "保持桌宠在任务栏上方，可能影响点击托盘。"
 			});
 
 			options.Add(new OptionIcons
 			{
-				Title = "Volume",
+				Title = "音量",
 				Setting = SettingName.Volume,
 				IsCheckbox = false,
 				MaxValue = 100,
 				Value = Program.MyData.GetIntValue(SettingName.Volume),
 				Image = Resources.ico_sound,
-				Description = "If the pet contains also sounds/fx, you can set the volume for it."
+				Description = "调整支持音效的桌宠的音量。"
 			});
 
 			options.Add(new OptionIcons
 			{
-				Title = "Win Foreground",
+				Title = "碰撞后置顶窗口",
 				Setting = SettingName.WinForeground,
 				IsCheckbox = true,
 				Value = Program.MyData.GetIntValue(SettingName.WinForeground),
 				Image = Resources.ico_foreground,
-				Description = "The original eSheep was able to bring in front the collided window. This will decrease your productivity, so it is disabled by default."
+				Description = "允许原版桌宠将碰到的窗口切到前台。仅适用于其他角色。"
 			});
 
 			showActiveOptions = true;
@@ -115,13 +115,13 @@ namespace DesktopPet
 
 			options.Add(new OptionIcons
 			{
-				Title = "Pet Quantity",
+				Title = "启动时的数量",
 				Setting = SettingName.AutostartPets,
 				IsCheckbox = false,
 				MaxValue = 16,
 				Value = Program.MyData.GetIntValue(SettingName.AutostartPets),
 				Image = Resources.ico_quantity,
-				Description = "Select the quantity of pets to start when the application starts."
+				Description = "设置下次打开程序时出现的桌宠数量。"
 			});
 
 			options.Add(new OptionIcons
@@ -131,12 +131,12 @@ namespace DesktopPet
 				IsCheckbox = true,
 				Value = 0,
 				Image = Resources.ico_restore,
-				Description = "If you have some troubles, you can restore the default pet animation (the original one integrated in the app)."
+				Description = "恢复程序自带的桌宠。"
 			});
 
 			options.Add(new OptionIcons
 			{
-				Title = "Scale",
+				Title = "角色大小",
 				Setting = SettingName.PetScale,
 				IsCheckbox = false,
 				Value = Program.MyData.GetIntValue(SettingName.PetScale),
@@ -144,7 +144,7 @@ namespace DesktopPet
 				ValuesText = new List<string> { "1x", "2x", "4x"},
 				Image = Resources.ico_resize,
 				NeedRestart = true,
-				Description = "On HD monitors, the pet is really small. \nScale your pet to 1x, 2x or 4x."
+				Description = "选择 1 倍、2 倍或 4 倍大小。"
 			});
 
 			selectedOption = options[0];
@@ -266,13 +266,13 @@ namespace DesktopPet
 				Invalidate();
 				if (selectedOption == null)
 				{
-					form.SetLeftInfo(null, "Options", "Select an Option\nto view its description.");
+					form.SetLeftInfo(null, "设置", "选中设置项查看说明。\n双击修改。");
 				}
 				else
 				{
 					var description = selectedOption.Description;
 					description += "\n\n";
-					if (selectedOption.IsCheckbox) description += selectedOption.Value > 0 ? "Enabled" : "Disabled";
+					if (selectedOption.IsCheckbox) description += selectedOption.Value > 0 ? "已开启" : "已关闭";
 					else if (selectedOption.MaxValue > 0) description += selectedOption.Title + ": " + selectedOption.Value;
 					form.SetLeftInfo(
 						selectedOption.Image,

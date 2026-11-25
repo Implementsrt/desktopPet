@@ -196,6 +196,21 @@
     <Compile Include="dotNet\FormPet.Motion.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="dotNet\FormPet.Sprout.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutSkills.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutWindows.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutAgent.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="dotNet\FormPet.SproutHabits.cs">
+      <DependentUpon>FormPet.cs</DependentUpon>
+    </Compile>
     <Compile Include="dotNet\ContextMenus.cs" />
     <Compile Include="dotNet\EmbeddedAssembly.cs" />
     <Compile Include="dotNet\ProcessIcon.cs" />
@@ -332,6 +347,9 @@
     <Content Include="Images\wvleft.jpg" />
     <EmbeddedResource Include="Portable\Newtonsoft.Json.dll" />
     <EmbeddedResource Include="Portable\NAudio.dll" />
+    <EmbeddedResource Include="..\Pets\sprout\animations.xml">
+      <LogicalName>DesktopPet.SproutAnimations.xml</LogicalName>
+    </EmbeddedResource>
     <None Include="Images\install.png" />
     <None Include="Images\option.png" />
     <Content Include="Images\about.png" />

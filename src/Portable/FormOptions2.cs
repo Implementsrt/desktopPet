@@ -674,8 +674,8 @@ namespace DesktopPet
 			{
 				ControlPaint.DrawButton(g, new Rectangle(15/*+ClientRectangle.Width/2*/, ClientRectangle.Height - 40, ClientRectangle.Width / 2 - 30, 30), ButtonState.Normal);
 				ControlPaint.DrawButton(g, new Rectangle(15 + ClientRectangle.Width / 2, ClientRectangle.Height - 40, ClientRectangle.Width / 2 - 30, 30), ButtonState.Normal);
-				g.DrawString("OK", fontText, Brushes.Black, ClientRectangle.Width / 4 - 10, ClientRectangle.Height - 35);
-				g.DrawString("Cancel", fontText, Brushes.Black, ClientRectangle.Width / 4 * 3 - 25, ClientRectangle.Height - 35);
+				g.DrawString("确定", fontText, Brushes.Black, ClientRectangle.Width / 4 - 14, ClientRectangle.Height - 35);
+				g.DrawString("取消", fontText, Brushes.Black, ClientRectangle.Width / 4 * 3 - 14, ClientRectangle.Height - 35);
 				controls.ForEach(c =>
 				{
 					if(c.IsCheckbox)

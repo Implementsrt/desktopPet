@@ -65,7 +65,7 @@ namespace DesktopPet
 			// Item: New Sheep.
 			newSheepMenuItem = new ToolStripMenuItem
 			{
-				Text = "&Add new Sheep"
+				Text = "添加桌宠"
 			};
 			newSheepMenuItem.Click += new EventHandler(AddNewSheep_Click);
             newSheepMenuItem.Image = Resources.icon.ToBitmap();
@@ -75,11 +75,14 @@ namespace DesktopPet
 			// Item: Options.
 			item = new ToolStripMenuItem
 			{
-				Text = "&Options"
+				Text = "设置"
 			};
-			item.Click += new EventHandler(Options_Click);
             item.Image = Resources.option;
+            item.DropDownItems.Add("常规", null, (sender, e) => ShowSettings(FormOptions2.WindowType.AppConfiguration, "常规设置"));
+            item.DropDownItems.Add("动作", null, (sender, e) => ShowSettings(FormOptions2.WindowType.AppAnimationOptions, "动作设置"));
             menu.Items.Add(item);
+
+            menu.Items.Add("桌宠库", null, Options_Click);
 
                 // Item: Separator.
             sep = new ToolStripSeparator();
@@ -92,9 +95,9 @@ namespace DesktopPet
             // Item: Install.
             item = new ToolStripMenuItem();
             if (!Program.IsApplicationInstalled())
-                item.Text = "&Install application...";
+                item.Text = "安装程序…";
             else
-                item.Text = "Repair/&Uninstall...";
+                item.Text = "修复或卸载…";
             item.Click += new EventHandler(InstallApplication);
             item.Image = installForm.Icon.ToBitmap();
             menu.Items.Add(item);
@@ -102,7 +105,7 @@ namespace DesktopPet
 			// Item: Audio.
 			item = new ToolStripMenuItem
 			{
-				Text = "&Play FX"
+				Text = "音效"
 			};
 			item.Click += new EventHandler(Audio_Click);
 			item.Image = Resources.audioon;
@@ -115,7 +118,7 @@ namespace DesktopPet
 			// Item: About.
 			item = new ToolStripMenuItem
 			{
-				Text = "A&bout"
+				Text = "关于"
 			};
 			item.Click += new EventHandler(About_Click);
             item.Image = Resources.about;
@@ -124,7 +127,7 @@ namespace DesktopPet
 			// Item: Help.
 			item = new ToolStripMenuItem
 			{
-				Text = "&Help"
+				Text = "帮助"
 			};
 			item.Click += new EventHandler(Help_Click);
             item.Image = Resources.help;
@@ -137,7 +140,7 @@ namespace DesktopPet
 			// Item: Close application.
 			closeSheepMenuItem = new ToolStripMenuItem
 			{
-				Text = "&Remove Sheep and Close"
+				Text = "退出桌宠"
 			};
 			closeSheepMenuItem.Click += new EventHandler(Exit_Click);
             closeSheepMenuItem.Image = Resources.exit;
@@ -165,9 +168,8 @@ namespace DesktopPet
         /// <param name="aboutInfo">About the animation (copyright and author information)</param>
         static public void UpdateIcon(Icon newIcon, string petName, string aboutAuthor, string aboutTitle, string aboutVersion, string aboutInfo)
         {
-            newSheepMenuItem.Text = "&Add new " + petName;
+            newSheepMenuItem.Text = "添加一只" + petName;
             newSheepMenuItem.Image = newIcon.ToBitmap();
-            closeSheepMenuItem.Text = "&Remove " + petName + " and Close";
 
             author = aboutAuthor;
             title = aboutTitle;
@@ -274,11 +276,26 @@ namespace DesktopPet
             }
         }
 
-            /// <summary>
-            /// Processes a menu item. Will close the application after closing all pets.
-            /// </summary>
-            /// <param name="sender">The sender.</param>
-            /// <param name="e">The <see cref="System.EventArgs"/> instance containing the event data.</param>
+        private void ShowSettings(FormOptions2.WindowType type, string caption)
+        {
+            if (isAboutLoaded || isOptionLoaded) return;
+            isOptionLoaded = true;
+            try
+            {
+                using (var options = new FormOptions2(caption, type))
+                {
+                    if (options.ShowDialog() == DialogResult.Retry)
+                    {
+                        Program.MyData.SetIcon("");
+                        Program.MyData.SetImages("");
+                        Program.MyData.SetXml("", "");
+                        Program.RestartApp();
+                    }
+                }
+            }
+            finally { isOptionLoaded = false; }
+        }
+
         void Exit_Click(object sender, EventArgs e)
         {
             // Quit without further ado.

@@ -436,10 +436,10 @@ namespace DesktopPet
 		public void GenerateDefaultMenu()
 		{
 			List<TMenuText> menuFile = new List<TMenuText>();
-			menuFile.Add(new TMenuText { Text = "Close ", Width = 68, LetterOffset = 10, Index = MenuItemIndex.Close });
+			menuFile.Add(new TMenuText { Text = "关闭", Width = 68, LetterOffset = 14, Index = MenuItemIndex.Close });
 
 			List<TMenuText> menuBase = new List<TMenuText>();
-			menuBase.Add(new TMenuText { Text = "File  ", Width = 35, LetterOffset = 10, SubItems = menuFile });
+			menuBase.Add(new TMenuText { Text = "文件", Width = 40, LetterOffset = 14, SubItems = menuFile });
 
 			GenerateMenu(menuBase);
 		}

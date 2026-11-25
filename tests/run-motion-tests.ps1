@@ -44,6 +44,8 @@ foreach ($platform in $Platforms) {
     if ($LASTEXITCODE -ne 0) { throw 'Display topology test compilation failed.' }
     & "$runtime/DisplayTopologyTests.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Display topology tests failed.' }
+    & $compiler /nologo "/platform:$platform" /r:System.Drawing.dll /r:System.Windows.Forms.dll "/out:$runtime/SproutRuntimeTests.exe" "$repo/tests/SproutRuntimeTests.cs"
+    if ($LASTEXITCODE -ne 0) { throw 'Sprout runtime test compilation failed.' }
     Copy-Item "$repo/src/Resources/animations.xml" "$runtime/motion-fixture.xml"
     foreach ($scale in $Scales) {
         foreach ($display in $Displays) {
@@ -55,4 +57,9 @@ foreach ($platform in $Platforms) {
             if ($LASTEXITCODE -ne 0) { throw "Continuous transition tests failed: $platform, scale $scale, display $display." }
         }
     }
+    Push-Location $runtime
+    try {
+        & "$runtime/SproutRuntimeTests.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Sprout runtime tests failed.' }
+    } finally { Pop-Location }
 }
